@@ -5,6 +5,6 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :main clj-json-patch.core
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [cheshire "5.3.0"]]
+                 [cheshire "5.8.0"]]
   :profiles {:dev {:dependencies [[midje "1.6.3"]]
                    :plugins [[lein-midje "3.0.0"]]}})

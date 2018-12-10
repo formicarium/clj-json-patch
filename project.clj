@@ -1,4 +1,4 @@
-(defproject formicarium/clj-json-patch "0.1.8"
+(defproject formicarium/clj-json-patch "0.1.9"
   :description "Clojure implementation of http://tools.ietf.org/html/rfc6902"
   :url "http://github.com/formicarium/clj-json-patch"
   :license {:name "Eclipse Public License"

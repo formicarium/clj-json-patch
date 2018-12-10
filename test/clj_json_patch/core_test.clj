@@ -30,6 +30,13 @@
              patches [{"op" "add" "path" "/foo/1" "value" "qux"}]]
          (fact "Adding a second Array Element"
                (diff obj1 obj2) => patches))
+
+       (let [obj1 {"foo" [{"goo" "daa"}]}
+             obj2 {"foo" [{"goo" "daa", "bar" "baz"}]}
+             patches [{"op" "add" "path" "/foo/0/bar" "value" "baz"}]]
+            (fact "Adding a entry in a object inside an array"
+                  (diff obj1 obj2) => patches))
+
        (let [obj1 {"foo" "bar" "baz" "qux"}
              obj2 {"foo" "bar"}
              patches [{"op" "remove" "path" "/baz"}]]
@@ -127,6 +134,13 @@
              patches [{"op" "add" "path" "/foo/1" "value" "qux"}]]
          (fact "Adding a second Array Element"
                (patch obj1 patches) => obj2))
+
+       (let [obj1 {"foo" [{"goo" "daa"}]}
+             obj2 {"foo" [{"goo" "daa", "bar" "baz"}]}
+             patches [{"op" "add" "path" "/foo/0/bar" "value" "baz"}]]
+            (fact "Adding a entry in a object inside an array"
+                  (patch obj1 patches) => obj2))
+
        (let [obj1 {"foo" "bar" "baz" "qux"}
              obj2 {"foo" "bar"}
              patches [{"op" "remove" "path" "/baz"}]]
@@ -187,7 +201,7 @@
        (let [obj1 {"foo" "bar"}
              patches [{"op" "add" "path" "/baz/bat" "value" "qux"}]]
          (fact "Adding to a nonexistent target"
-               (patch obj1 patches) => (throws Exception "Unable to set value at '/baz/bat'. Consider adding a more explicit data structure as a child of an existing object.")))
+               (patch obj1 patches) => (throws Exception)))
        (let [obj1 {"foo" {"bar" "baz"
                           "waldo" "fred"}
                    "qux" {"corge" "grault"}}
@@ -261,7 +275,7 @@
        (let [obj1 {"foo" ["bar" "baz"]}
              patches [{"op" "add" "path" "/foo/3" "value" "qux"}]]
          (fact "Adding a second Array Element"
-               (patch obj1 patches) => (throws Exception "Unable to set value at 3.")))
+               (patch obj1 patches) => (throws Exception)))
        (let [obj1 {"foo" "bar" "boo" "qux"}
              patches [{"op" "replace" "path" "/baz" "value" "boo"}]]
          (fact "Replacing a Value that doesn't exist"
@@ -284,4 +298,4 @@
        (let [obj1 {"foo" ["all" "grass" "cows" "eat"]}
              patches [{"op" "add" "path" "/foo/two"}]]
          (fact "Adding an Array Element to an non-number index"
-               (patch obj1 patches) => (throws Exception "Unable to determine array index from 'two'."))))
+               (patch obj1 patches) => (throws Exception))))

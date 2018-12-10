@@ -15,24 +15,24 @@
                          (diff-vecs obj1 obj2 prefix)
                          (and (map? obj1) (map? obj2))
                          (vec
-                          (flatten
-                           (remove nil?
-                                   (concat
-                                    (for [[k v1] obj1]
-                                      (let [v2 (get obj2 k)]
-                                        (cond (and (vector? v1) (vector? v2))
-                                              (diff* v1 v2 (str prefix k "/"))
-                                              (not (contains? obj2 k))
-                                              (gen-op ["remove" (str prefix k)])
-                                              (and (map? v1) (map? v2))
-                                              (diff* v1 v2 (str prefix k "/"))
-                                              (and (contains? obj2 k)
-                                                   (not= v1 v2))
-                                              (gen-op ["replace" (str prefix k) v2]))))
-                                    (for [[k v2] obj2]
-                                      (let [v1 (get obj1 k)]
-                                        (cond (not (contains? obj1 k))
-                                              (gen-op ["add" (str prefix k) v2])))))))))))
+                           (flatten
+                             (remove nil?
+                                     (concat
+                                       (for [[k v1] obj1]
+                                         (let [v2 (get obj2 k)]
+                                           (cond (and (vector? v1) (vector? v2))
+                                                 (diff* v1 v2 (str prefix k "/"))
+                                                 (not (contains? obj2 k))
+                                                 (gen-op ["remove" (str prefix k)])
+                                                 (and (map? v1) (map? v2))
+                                                 (diff* v1 v2 (str prefix k "/"))
+                                                 (and (contains? obj2 k)
+                                                      (not= v1 v2))
+                                                 (gen-op ["replace" (str prefix k) v2]))))
+                                       (for [[k v2] obj2]
+                                         (let [v1 (get obj1 k)]
+                                           (cond (not (contains? obj1 k))
+                                                 (gen-op ["add" (str prefix k) v2])))))))))))
 (defn eval-escape-characters
   [segment]
   (clojure.string/replace segment #"(~0|~1)"
@@ -45,77 +45,68 @@
                           (fn [[_ s]] (cond (= s "~") "~0"
                                             (= s "/") "~1"))))
 
+(defn check-if-parent-exists!
+  [obj ks]
+  (let [parent (get-in obj (drop-last ks))]
+    (if-not parent
+      (throw (ex-info "Parent does not exist" {:parent parent})))))
+
 (defn get-patch-value
   "Given the patch path, find the associated value."
   [obj path]
   (if-let [match (re-find #"^/([^/]+)(.*)" path)]
     (let [seg (eval-escape-characters (second match))
           segs (nth match 2)
-          val (cond (map? obj)
-                    (get obj seg)
-                    (vector? obj)
-                    (nth obj (Integer/parseInt seg)))]
+          val (cond (map? obj) (get obj seg)
+                    (vector? obj) (nth obj (Integer/parseInt seg)))]
       (if-not (empty? segs)
         (get-patch-value val segs)
         val))))
 
+(defn only-digits? [str] (boolean (re-matches #"\d+" str)))
+
+(defn is-target-location-an-array?
+  [path]
+  (let [segs (re-seq #"/([^/]+)" path)
+        last-segment (-> (last segs) second)]
+    (or (only-digits? last-segment) (= last-segment "-"))))
+
+(defn insert-at
+  [vect idx val]
+  (if (= idx "-")
+    (insert-at vect (count vect) val)
+    (vec (concat (subvec vect 0 idx)
+                 [val]
+                 (subvec vect idx)))))
+
+(defn parse-path
+  [path]
+  (->> (re-seq #"/([^/]+)" path)
+       (map second)
+       (map eval-escape-characters)
+       (map #(if (only-digits? %1)
+               (Integer/parseInt %1)
+               %1))))
+
 (defn set-patch-value
   "Set val at path in obj"
   [obj path val]
-  (if-let [segs (re-seq #"/([^/]+)" path)]
-    (if (> (count segs) 1)
-      (if-let [path-exists (try (get-patch-value obj path)
-                                (catch Exception e
-                                  (throw (Exception. (str "Unable to set value at '" path "'.")))))]
-        (let [parent-match (re-find #"(.*)(/[^/+])" path)
-              parent-path (apply str (map first (take (dec (count segs)) segs)))
-              parent (get-patch-value obj parent-path)]
-          (set-patch-value obj parent-path
-                           (set-patch-value parent (first (last segs)) val)))
-        (throw (Exception. (str "Unable to set value at '" path
-                                "'. Consider adding a more explicit data "
-                                "structure as a child of an existing object."))))
-      (cond (map? obj)
-            (assoc obj (eval-escape-characters (second (first segs))) val)
-            (vector? obj)
-            (let [idx (Integer/parseInt (second (re-find #"/(\d+)" path)))]
-              (try
-                (vec (concat (subvec obj 0 idx)
-                             [val]
-                             (subvec obj idx)))
-                (catch Exception e
-                  (throw (Exception. (str "Unable to set value at " idx "."))))))))
-    (throw (Exception. "Patch path must start with '/'"))))
+  (assoc-in obj (parse-path path) val))
 
 (defn add-patch-value
   "Add val at path in obj"
   [obj path val]
-  (if-let [segs (re-seq #"/([^/]+)" path)]
-    (if (> (count segs) 1)
-      (let [parent-match (re-find #"(.*)(/[^/+])" path)
-            parent-path (apply str (map first (take (dec (count segs)) segs)))
-            parent (get-patch-value obj parent-path)]
-        (if (vector? parent)
-          (let [str-idx (last (last segs))]
-            (if (or (= "-" str-idx)
-                    (= (count parent) (try (Integer/parseInt str-idx)
-                                           (catch java.lang.NumberFormatException e
-                                             (throw (Exception. (str "Unable to determine array index from '" str-idx "'.")))))))
-              (set-patch-value obj parent-path
-                               (conj parent val))
-              (set-patch-value obj parent-path
-                               (set-patch-value parent (first (last segs)) val))))
-          (if-let [path-exists (try (get-patch-value obj parent-path)
-                                  (catch Exception e
-                                    (throw (Exception. (str "Unable to set value at '" path "'.")))))]
 
-            (set-patch-value obj parent-path
-                             (set-patch-value parent (first (last segs)) val))
-            (throw (Exception. (str "Unable to set value at '" path
-                                "'. Consider adding a more explicit data "
-                                "structure as a child of an existing object."))))))
-      (set-patch-value obj path val))
-    (throw (Exception. "Patch path must start with '/'"))))
+  (try
+    (let [path-parsed (parse-path path)
+         last (last path-parsed)]
+     (check-if-parent-exists! obj path-parsed)
+     (cond
+       (is-target-location-an-array? path) (update-in obj
+                                                      (drop-last path-parsed)
+                                                      (fn [x] (insert-at x last val)))
+       :else (set-patch-value obj path val)))
+    (catch Exception e (throw (ex-info (str "Unable to add patch for path " path) {:path path :obj obj})) )))
 
 (defn move-patch-value
   "Move value located at 'from' to the 'path'."
@@ -143,12 +134,12 @@
                                    (Integer/parseInt (second (re-find #"/(\d+)" from)))
                                    (catch Exception e
                                      (throw (Exception. (str "Move attempted on value that does not exist at '" from "'.")))))
-                          to-int (try
-                                   (Integer/parseInt (second (re-find #"/(\d+)" path)))
-                                   (catch Exception e
-                                     (throw (Exception. (str "Move attempted on value that does not exist at '" path "'.")))))]
-                      (vec (concat (subvec obj 0 from-int) (subvec obj (inc from-int) (inc to-int))
-                                   [(get obj from-int)] (subvec obj (inc to-int)))))
+                        to-int (try
+                                 (Integer/parseInt (second (re-find #"/(\d+)" path)))
+                                 (catch Exception e
+                                   (throw (Exception. (str "Move attempted on value that does not exist at '" path "'.")))))]
+                    (vec (concat (subvec obj 0 from-int) (subvec obj (inc from-int) (inc to-int))
+                                 [(get obj from-int)] (subvec obj (inc to-int)))))
                   ))
           (throw (Exception. (str "Move attempted on value that does not exist at '"
                                   from "'.")))))
@@ -166,7 +157,7 @@
           (let [parent-path (apply str (map first (take (dec (count segs)) segs)))
                 parent (get-patch-value obj parent-path)]
             (replace-patch-value obj parent-path
-                             (replace-patch-value parent (first (last segs)) val)))
+                                 (replace-patch-value parent (first (last segs)) val)))
           (cond (map? obj)
                 (assoc obj (second (first segs)) val)
                 (vector? obj)
@@ -186,9 +177,9 @@
         (if-let [segs (re-seq #"/([^/]+)" path)]
           (if (> (count segs) 1)
             (let [parent-path (apply str (map first (take (dec (count segs)) segs)))
-                  parent      (get-patch-value obj parent-path)]
+                  parent (get-patch-value obj parent-path)]
               (replace-patch-value obj parent-path
-                               (remove-patch-value parent (first (last segs)))))
+                                   (remove-patch-value parent (first (last segs)))))
             (cond (map? obj)
                   (dissoc obj (second (first segs)))
                   (vector? obj)
@@ -205,16 +196,16 @@
     (let [value (get-patch-value obj path)]
       (if (not= val value)
         (throw (Exception.
-                (str "The value is: "
-                     (json/generate-string value))))
+                 (str "The value is: "
+                      (json/generate-string value))))
         obj)
       )
     (catch Exception e
       (throw (Exception.
-              (str "The test failed. "
-                   (json/generate-string val)
-                   " is not found at " path ". "
-                   (.getMessage e)))))))
+               (str "The test failed. "
+                    (json/generate-string val)
+                    " is not found at " path ". "
+                    (.getMessage e)))))))
 
 (defn apply-patch [obj patch]
   "Apply the patch operation in patch to obj, returning the new obj representation."
@@ -235,9 +226,9 @@
 
 (defn gen-op [t]
   [(let [result {"op" (first t) "path" (second t)}]
-    (if (> (count t) 2)
-      (assoc result "value" (nth t 2))
-      result))] )
+     (if (> (count t) 2)
+       (assoc result "value" (nth t 2))
+       result))])
 
 (defn clean-prefix
   [prefix path]
@@ -265,10 +256,10 @@
     (cond (and (empty? v1) (empty? v2))
           ops
           (and (> (count ops) 0)
-                  (= v2
-                     (reduce
-                      #(apply-patch %1 %2) v1
-                      (map (partial sanitize-prefix-in-patch prefix (dec i)) ops))))
+               (= v2
+                  (reduce
+                    #(apply-patch %1 %2) v1
+                    (map (partial sanitize-prefix-in-patch prefix (dec i)) ops))))
           ops
           (= (set v1) (set v2))
           (cond (= i (count v1))
@@ -288,7 +279,7 @@
             (recur (rest v1) (rest v2) (inc i)
                    (conj ops (diff* (first v1) (first v2) (str prefix i "/"))))
             (recur (rest v1) (rest v2) (inc i)
-                 (conj ops (gen-op ["replace" (str prefix i) (first v2)]))))
+                   (conj ops (gen-op ["replace" (str prefix i) (first v2)]))))
           (and (= (first v1) (first v2))
                (not= (rest v1) (rest v2)))
           (recur (rest v1) (rest v2) (inc i) ops))))
@@ -297,18 +288,18 @@
   "Traverses obj, looking for a value that matches val, returns path to value."
   ([obj val] (get-value-path obj val "/"))
   ([obj val prefix]
-     (cond (map? obj)
-           (some identity
-                 (concat
-                  (for [[k v] obj]
-                    (if (= v val)
-                      (str prefix (inject-escape-characters k))
-                      (if-not (string? v)
-                        (get-value-path v val (str prefix (inject-escape-characters k) "/")))))))
-           (vector? obj)
-           (if-let [idx (some identity (map-indexed #(if (= val %2) %1) obj))]
-               (str prefix idx)
-               (map-indexed #(get-value-path %2 val (str prefix %1 "/")) obj)))))
+   (cond (map? obj)
+         (some identity
+               (concat
+                 (for [[k v] obj]
+                   (if (= v val)
+                     (str prefix (inject-escape-characters k))
+                     (if-not (string? v)
+                       (get-value-path v val (str prefix (inject-escape-characters k) "/")))))))
+         (vector? obj)
+         (if-let [idx (some identity (map-indexed #(if (= val %2) %1) obj))]
+           (str prefix idx)
+           (map-indexed #(get-value-path %2 val (str prefix %1 "/")) obj)))))
 
 (defn transform-moves
   "Attempt to reconcile add/remove patch entries
